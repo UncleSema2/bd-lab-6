@@ -6,6 +6,7 @@ from pyspark.sql import SparkSession, functions as F
 from pyspark.sql.types import NumericType
 
 from config import AppConfig
+from storage import SqlServerStorage
 
 
 class FoodClusterService:
@@ -19,6 +20,7 @@ class FoodClusterService:
             .master(s.master)
             .config("spark.driver.memory", s.driver_memory)
             .config("spark.sql.shuffle.partitions", s.shuffle_partitions)
+            .config("spark.jars.packages", "com.microsoft.sqlserver:mssql-jdbc:12.8.1.jre11")
             .getOrCreate()
         )
         spark.sparkContext.setLogLevel(s.log_level)
@@ -26,16 +28,22 @@ class FoodClusterService:
 
     def fit(self):
         spark = self._create_spark()
+        storage = SqlServerStorage(self.config.sqlserver)
         try:
             path = self.config.data.input_path
+            raw = spark.read.parquet(path)
             numeric_cols = [
                 f.name
-                for f in spark.read.parquet(path).schema.fields
+                for f in raw.schema.fields
                 if isinstance(f.dataType, NumericType)
             ]
-            df = spark.read.parquet(path).select(
+            source = raw.select(
                 *[F.col(c).cast("double").alias(c) for c in numeric_cols]
             )
+
+            storage.ensure_database()
+            storage.write(source, self.config.sqlserver.input_table)
+            df = storage.read(spark, self.config.sqlserver.input_table)
 
             imputed_cols = [f"{c}_imp" for c in numeric_cols]
             pipeline = Pipeline(
@@ -67,5 +75,17 @@ class FoodClusterService:
                 distanceMeasure=self.config.training.distance_measure,
             ).evaluate(predictions)
             print(f"fit. {self.config.training.metric_name}={score:.4f}")
+
+            storage.write(
+                predictions.select(*numeric_cols, "prediction"),
+                self.config.sqlserver.predictions_table,
+            )
+            storage.write(
+                spark.createDataFrame(
+                    [(self.config.training.metric_name, float(score))],
+                    ["metric", "value"],
+                ),
+                self.config.sqlserver.metrics_table,
+            )
         finally:
             spark.stop()
