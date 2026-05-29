@@ -24,16 +24,6 @@ class FoodClusterService:
         spark.sparkContext.setLogLevel(s.log_level)
         return spark
 
-    def _sample(self, df, total: int):
-        target_n = self.config.preprocessing.target_n
-        if total <= target_n:
-            return df
-        return df.sample(
-            withReplacement=False,
-            fraction=target_n / total,
-            seed=self.config.training.seed,
-        )
-
     def fit(self):
         spark = self._create_spark()
         try:
