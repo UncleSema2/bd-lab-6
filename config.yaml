@@ -6,6 +6,14 @@ spark:
   log_level: WARN
 data:
   input_path: data/food.parquet
+sqlserver:
+  host: localhost
+  port: 1433
+  database: food
+  user: sa
+  input_table: food_input
+  predictions_table: food_predictions
+  metrics_table: food_metrics
 preprocessing:
   imputer_strategy: median
 training:
